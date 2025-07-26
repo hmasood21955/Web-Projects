@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Candidate Management - Voting System</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background: linear-gradient(120deg, #a18cd1 0%, #fbc2eb 100%); min-height: 100vh; }
+        .card { max-width: 700px; margin: 3rem auto; border-radius: 1.5rem; box-shadow: 0 4px 24px #a18cd133; }
+    </style>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+  <div class="container">
+    <a class="navbar-brand fw-bold" href="dashboard.html">Voting System</a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="navbarNav">
+      <ul class="navbar-nav ms-auto" id="navLinks"></ul>
+      <span class="navbar-text ms-3" id="userInfoNav"></span>
+    </div>
+  </div>
+</nav>
+<div class="container">
+    <div class="card p-4 mt-4">
+        <h2 class="mb-3 text-center">Candidate Management</h2>
+        <div id="adminCheck" class="mb-3"></div>
+        <div class="mb-3">
+            <label for="sessionSelect" class="form-label">Select Session</label>
+            <select id="sessionSelect" class="form-select"></select>
+        </div>
+        <form id="addCandidateForm" class="row g-2 mb-3">
+            <div class="col-md-8">
+                <input type="text" class="form-control" id="candidateName" placeholder="Candidate Name" required>
+            </div>
+            <div class="col-md-4">
+                <button type="submit" class="btn btn-success w-100">Add Candidate</button>
+            </div>
+        </form>
+        <div id="candidateMsg" class="mb-2"></div>
+        <div id="candidatesList"></div>
+    </div>
+</div>
+<script>
+
+let sessions = [];
+let selectedSession = null;
+
+async function checkAdmin() {
+    const res = await fetch('php/api/user_info.php');
+    const data = await res.json();
+    if (!data.success) {
+        window.location.href = 'login.html';
+        return false;
+    }
+    if (data.user.role !== 'admin') {
+        document.getElementById('adminCheck').innerHTML = '<div class="alert alert-danger">Admins only. <a href="dashboard.html">Go to Dashboard</a></div>';
+        document.getElementById('addCandidateForm').style.display = 'none';
+        document.getElementById('sessionSelect').style.display = 'none';
+        return false;
+    }
+    document.getElementById('userInfoNav').textContent = `${data.user.username} (${data.user.role})`;
+    let nav = '';
+    nav += '<li class="nav-item"><a class="nav-link" href="dashboard.html">Dashboard</a></li>';
+    nav += '<li class="nav-item"><a class="nav-link" href="sessions.html">Manage Sessions</a></li>';
+    nav += '<li class="nav-item"><a class="nav-link active" href="candidates.html">Manage Candidates</a></li>';
+    nav += '<li class="nav-item"><a class="nav-link" href="results.html">Results</a></li>';
+    nav += '<li class="nav-item"><a class="nav-link" href="#" onclick="logout()">Logout</a></li>';
+    document.getElementById('navLinks').innerHTML = nav;
+    return true;
+}
+
+async function loadSessions() {
+    const res = await fetch('php/api/sessions.php');
+    const data = await res.json();
+    if (!data.success) return;
+    sessions = data.sessions.filter(s => s.status === 'active'); // Only show active sessions
+    let options = '<option value="">Select a session...</option>';
+    for (const s of sessions) {
+        options += `<option value="${s.id}">${s.name}</option>`;
+    }
+    if (sessions.length === 0) {
+        document.getElementById('addCandidateForm').innerHTML = '<div class="alert alert-warning">No active sessions available. Please create and activate a session first.</div>';
+    }
+    document.getElementById('sessionSelect').innerHTML = options;
+    selectedSession = sessions.length ? sessions[0].id : null;
+    if (selectedSession) await loadCandidates(selectedSession);
+}
+
+document.getElementById('sessionSelect').onchange = async function() {
+    selectedSession = this.value;
+    await loadCandidates(selectedSession);
+};
+
+async function loadCandidates(sessionId) {
+    const res = await fetch(`php/api/candidates.php?session_id=${sessionId}`);
+    const data = await res.json();
+    let html = '';
+    if (data.success && data.candidates.length) {
+        html += '<ul class="list-group">';
+        for (const c of data.candidates) {
+            html += `<li class="list-group-item d-flex justify-content-between align-items-center">${c.name}<button class="btn btn-sm btn-danger" onclick="removeCandidate(${c.id}, ${sessionId})">Remove</button></li>`;
+        }
+        html += '</ul>';
+    } else {
+        html = '<div class="alert alert-warning">No candidates for this session.</div>';
+    }
+    document.getElementById('candidatesList').innerHTML = html;
+}
+
+document.getElementById('addCandidateForm').onsubmit = async function(e) {
+    e.preventDefault();
+    const name = document.getElementById('candidateName').value.trim();
+    if (!name || !selectedSession) return;
+    const res = await fetch('php/api/candidates.php', {
+        method: 'POST',
+        body: new URLSearchParams({ name, session_id: selectedSession })
+    });
+    const data = await res.json();
+    document.getElementById('candidateMsg').textContent = data.message;
+    if (data.success) {
+        this.reset();
+        await loadCandidates(selectedSession);
+    }
+};
+
+async function removeCandidate(id, sessionId) {
+    const ok = confirm('Remove this candidate?');
+    if (!ok) return;
+    const res = await fetch('php/api/candidates.php', {
+        method: 'DELETE',
+        body: new URLSearchParams({ id })
+    });
+    const data = await res.json();
+    document.getElementById('candidateMsg').textContent = data.message;
+    if (data.success) await loadCandidates(sessionId);
+}
+
+async function logout() {
+    await fetch('php/api/logout.php');
+    window.location.href = 'login.html';
+}
+
+(async function init() {
+    if (await checkAdmin()) {
+        await loadSessions();
+    }
+})();
+</script>
+</body>
+</html> 
